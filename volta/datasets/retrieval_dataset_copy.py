@@ -13,6 +13,7 @@ import _pickle as cPickle
 
 import base64
 import numpy as np
+from responses import target
 import tensorpack.dataflow as td
 
 import torch
@@ -44,14 +45,11 @@ def _load_annotations(annotations_jsonpath, task):
             if task == "RetrievalCOCO":
                 image_id = annotation["id"]
             elif task == "RetrievalFlickr30k":
-                # image_id = int(annotation["img_path"].split(".")[0])
-                image_id =annotation["img_path"].split(".")[0]
+                image_id = int(annotation["img_path"].split(".")[0])
             imgid2entry[image_id] = []
             count = 0
-            # Modify for BLA dataser, top 2 captions are correct
-            for i, sentences in enumerate(annotation["sentences"]):
-                label = 1 if i < 2 else 0
-                entries.append({"caption": sentences, "image_id": image_id, "label": label})
+            for sentences in annotation["sentences"]:
+                entries.append({"caption": sentences, "image_id": image_id})
                 imgid2entry[image_id].append(count)
                 count += 1
     return entries, imgid2entry
@@ -89,11 +87,11 @@ class RetrievalDataset(Dataset):
         self._num_locs = num_locs
         self._add_global_imgfeat = add_global_imgfeat
 
-        # if self._split == "train":
-        #     image_info = cPickle.load(open(os.path.join(dataroot, "hard_negative" + ".pkl"), "rb"))
-        #     for key, value in image_info.items():
-        #         setattr(self, key, value)
-        #     self.train_imgId2pool = {imageId: i for i, imageId in enumerate(self.train_image_list)}
+        if self._split == "train":
+            image_info = cPickle.load(open(os.path.join(dataroot, "hard_negative" + ".pkl"), "rb"))
+            for key, value in image_info.items():
+                setattr(self, key, value)
+            self.train_imgId2pool = {imageId: i for i, imageId in enumerate(self.train_image_list)}
 
         os.makedirs(os.path.join("/".join(annotations_jsonpath.split("/")[:-1]), "cache"), exist_ok=True)
         cache_path = os.path.join(
@@ -158,10 +156,6 @@ class RetrievalDataset(Dataset):
         image_id = entry["image_id"]
 
         features, num_boxes, boxes, _ = self._image_features_reader[image_id]
-        
-        # input_ids, input_mask, segment_ids, lm_label_ids, is_next, image_feat, image_loc, \
-        #         image_cls, obj_labels, obj_confs, attr_labels, attr_confs, image_attrs, image_label, image_mask, masked_label, image_id = batch
-        #     batch_size = input_ids.shape[0]
 
         mix_num_boxes = min(int(num_boxes), self._max_region_num)
         mix_boxes_pad = np.zeros((self._max_region_num, self._num_locs))
@@ -184,109 +178,100 @@ class RetrievalDataset(Dataset):
         # negative samples.
         # 1: correct one, 2: random caption wrong, 3: random image wrong. 4: hard image wrong.
 
-        # while True:
-        #     # sample a random image:
-        #     img_id2 = random.choice(self.image_id_list)
-        #     if img_id2 != image_id:
-        #         entry2 = self._entries[random.choice(self.imgid2entry[img_id2])]
-        #         break
-        #     elif len(self.image_id_list) == 1:
-        #         tokens = self._tokenizer.encode("[MASK]")
-        #         segment_ids = [0] * len(tokens)
-        #         input_mask = [1] * len(tokens)
-        #         padding = [self._padding_index] * (self._max_seq_length - len(tokens))
-        #         tokens = torch.from_numpy(np.array(tokens + padding))
-        #         input_mask = torch.from_numpy(np.array(input_mask + [0]*len(padding)))
-        #         segment_ids = torch.from_numpy(np.array(segment_ids + [0]*len(padding)))
-        #         entry2 = {"token": tokens, "input_mask": input_mask, "segment_ids": segment_ids}
-        #         break
+        while True:
+            # sample a random image:
+            img_id2 = random.choice(self.image_id_list)
+            if img_id2 != image_id:
+                entry2 = self._entries[random.choice(self.imgid2entry[img_id2])]
+                break
+            elif len(self.image_id_list) == 1:
+                tokens = self._tokenizer.encode("[MASK]")
+                segment_ids = [0] * len(tokens)
+                input_mask = [1] * len(tokens)
+                padding = [self._padding_index] * (self._max_seq_length - len(tokens))
+                tokens = torch.from_numpy(np.array(tokens + padding))
+                input_mask = torch.from_numpy(np.array(input_mask + [0]*len(padding)))
+                segment_ids = torch.from_numpy(np.array(segment_ids + [0]*len(padding)))
+                entry2 = {"token": tokens, "input_mask": input_mask, "segment_ids": segment_ids}
+                break
         
-        # features2 = features1
-        # image_mask2 = image_mask1
-        # spatials2 = spatials1
-        # caption2 = entry2["token"]
-        # input_mask2 = entry2["input_mask"]
-        # segment_ids2 = entry2["segment_ids"]
+        features2 = features1
+        image_mask2 = image_mask1
+        spatials2 = spatials1
+        caption2 = entry2["token"]
+        input_mask2 = entry2["input_mask"]
+        segment_ids2 = entry2["segment_ids"]
 
-        # # random image wrong
-        # while True:
-        #     # sample a random image:
-        #     img_id3 = random.choice(self.image_id_list)
-        #     if img_id3 != image_id:
-        #         break
-        #     elif len(self.image_id_list) == 1:
-        #         img_id3 = random.choice(self._image_features_reader._image_ids).decode()
-        #         break
+        # random image wrong
+        while True:
+            # sample a random image:
+            img_id3 = random.choice(self.image_id_list)
+            if img_id3 != image_id:
+                break
+            elif len(self.image_id_list) == 1:
+                img_id3 = random.choice(self._image_features_reader._image_ids).decode()
+                break
 
-        # features3, num_boxes3, boxes3, _ = self._image_features_reader[img_id3]
-        # image_mask3 = [1] * (int(num_boxes3))
+        features3, num_boxes3, boxes3, _ = self._image_features_reader[img_id3]
+        image_mask3 = [1] * (int(num_boxes3))
 
-        # mix_num_boxes3 = min(int(num_boxes3), self._max_region_num)
+        mix_num_boxes3 = min(int(num_boxes3), self._max_region_num)
 
-        # while len(image_mask3) < self._max_region_num:
-        #     image_mask3.append(0)
+        while len(image_mask3) < self._max_region_num:
+            image_mask3.append(0)
 
-        # mix_boxes_pad[:mix_num_boxes3] = boxes3[:mix_num_boxes3]
-        # mix_features_pad[:mix_num_boxes3] = features3[:mix_num_boxes3]
+        mix_boxes_pad[:mix_num_boxes3] = boxes3[:mix_num_boxes3]
+        mix_features_pad[:mix_num_boxes3] = features3[:mix_num_boxes3]
 
-        # features3 = torch.tensor(mix_features_pad).float()
-        # image_mask3 = torch.tensor(image_mask3).long()
-        # spatials3 = torch.tensor(mix_boxes_pad).float()
+        features3 = torch.tensor(mix_features_pad).float()
+        image_mask3 = torch.tensor(image_mask3).long()
+        spatials3 = torch.tensor(mix_boxes_pad).float()
 
-        # caption3 = caption1
-        # input_mask3 = input_mask1
-        # segment_ids3 = segment_ids1
+        caption3 = caption1
+        input_mask3 = input_mask1
+        segment_ids3 = segment_ids1
 
-        # if self._split == "train":
-        #     # random hard caption.
-        #     rand_img_id_pool = self.train_hard_pool[self.train_imgId2pool[image_id]]
-        #     pool_img_idx = int(rand_img_id_pool[np.random.randint(1, len(rand_img_id_pool))])
-        #     img_id4 = self.train_image_list[pool_img_idx]
-        #     entry4 = self._entries[random.choice(self.imgid2entry[img_id4])]
-        # else:
-        #     while True:
-        #         # sample a random image:
-        #         img_id4 = random.choice(self.image_id_list)
-        #         if img_id4 != image_id:
-        #             entry4 = self._entries[random.choice(self.imgid2entry[img_id4])]
-        #             break
-        #         elif len(self.image_id_list) == 1:
-        #             tokens = self._tokenizer.encode("[MASK]")
-        #             segment_ids = [0] * len(tokens)
-        #             input_mask = [1] * len(tokens)
-        #             padding = [self._padding_index] * (self._max_seq_length - len(tokens))
-        #             tokens = torch.from_numpy(np.array(tokens + padding))
-        #             input_mask = torch.from_numpy(np.array(input_mask + [0]*len(padding)))
-        #             segment_ids = torch.from_numpy(np.array(segment_ids + [0]*len(padding)))
-        #             entry4 = {"token": tokens, "input_mask": input_mask, "segment_ids": segment_ids} 
-        #             break
+        if self._split == "train":
+            # random hard caption.
+            rand_img_id_pool = self.train_hard_pool[self.train_imgId2pool[image_id]]
+            pool_img_idx = int(rand_img_id_pool[np.random.randint(1, len(rand_img_id_pool))])
+            img_id4 = self.train_image_list[pool_img_idx]
+            entry4 = self._entries[random.choice(self.imgid2entry[img_id4])]
+        else:
+            while True:
+                # sample a random image:
+                img_id4 = random.choice(self.image_id_list)
+                if img_id4 != image_id:
+                    entry4 = self._entries[random.choice(self.imgid2entry[img_id4])]
+                    break
+                elif len(self.image_id_list) == 1:
+                    tokens = self._tokenizer.encode("[MASK]")
+                    segment_ids = [0] * len(tokens)
+                    input_mask = [1] * len(tokens)
+                    padding = [self._padding_index] * (self._max_seq_length - len(tokens))
+                    tokens = torch.from_numpy(np.array(tokens + padding))
+                    input_mask = torch.from_numpy(np.array(input_mask + [0]*len(padding)))
+                    segment_ids = torch.from_numpy(np.array(segment_ids + [0]*len(padding)))
+                    entry4 = {"token": tokens, "input_mask": input_mask, "segment_ids": segment_ids} 
+                    break
 
-        # features4 = features1
-        # image_mask4 = image_mask1
-        # spatials4 = spatials1
-        # caption4 = entry4["token"]
-        # input_mask4 = entry4["input_mask"]
-        # segment_ids4 = entry4["segment_ids"]
+        features4 = features1
+        image_mask4 = image_mask1
+        spatials4 = spatials1
+        caption4 = entry4["token"]
+        input_mask4 = entry4["input_mask"]
+        segment_ids4 = entry4["segment_ids"]
 
-        # features = torch.stack([features1, features2, features3, features4], dim=0)
-        # spatials = torch.stack([spatials1, spatials2, spatials3, spatials4], dim=0)
-        # image_mask = torch.stack([image_mask1, image_mask2, image_mask3, image_mask4], dim=0)
-        # caption = torch.stack([caption1, caption2, caption3, caption4], dim=0)
-        # input_mask = torch.stack([input_mask1, input_mask2, input_mask3, input_mask4], dim=0)
-        # segment_ids = torch.stack([segment_ids1, segment_ids2, segment_ids3, segment_ids4], dim=0)
-        # target = 0
-        features = features1
-        spatials1 = spatials1
-        caption = caption1
-        input_mask = input_mask1
-        segment_ids = segment_ids1
-        
-        # return features, spatials, image_mask, caption, target, input_mask, segment_ids, image_id, index
-        return input_ids, features, image_loc, segment_ids,\
-               input_mask, image_mask, lm_label_ids, image_label,\
-               image_cls, obj_labels, obj_confs, attr_labels,\
-               attr_confs, image_attrs, is_match
-               
+        features = torch.stack([features1, features2, features3, features4], dim=0)
+        spatials = torch.stack([spatials1, spatials2, spatials3, spatials4], dim=0)
+        image_mask = torch.stack([image_mask1, image_mask2, image_mask3, image_mask4], dim=0)
+        caption = torch.stack([caption1, caption2, caption3, caption4], dim=0)
+        input_mask = torch.stack([input_mask1, input_mask2, input_mask3, input_mask4], dim=0)
+        segment_ids = torch.stack([segment_ids1, segment_ids2, segment_ids3, segment_ids4], dim=0)
+        target = 0
+
+        return features, spatials, image_mask, caption, target, input_mask, segment_ids, image_id, index
+
     def __len__(self):
         return len(self._entries)
 
@@ -300,8 +285,7 @@ def _load_annotationsVal(annotations_jsonpath, task):
             if task == "RetrievalCOCO":
                 image_id = annotation["id"]
             elif task == "RetrievalFlickr30k":
-                # image_id = int(annotation["img_path"].split(".")[0])
-                image_id =annotation["img_path"].split(".")[0]
+                image_id = int(annotation["img_path"].split(".")[0])
             elif task == "RetrievalxFlickrCO":
                 image_id = annotation["img_path"]
             elif task == "RetrievalWIT":
@@ -334,7 +318,6 @@ class RetrievalDatasetVal(Dataset):
         add_global_imgfeat=None,
         append_mask_sep=False,
         num_subiters=2,
-        caption_set_size = 2,
     ):
         # All the keys in `self._entries` would be present in `self._image_features_reader`
         self._image_entries, self._caption_entries = _load_annotationsVal(annotations_jsonpath, task)
@@ -353,12 +336,7 @@ class RetrievalDatasetVal(Dataset):
         self.num_images = len(self._image_entries)
         self.num_entries = len(self._caption_entries)
         self.max_num_images = self.num_images // self.num_subiters + int(self.num_images % self.num_subiters > 0)
-        # if "FOIL" in annotations_jsonpath:
-        #     self.caption_set_size = 2
-        # else:
-        #     self.caption_set_size = 4
-        self.caption_set_size = caption_set_size
-        
+
         os.makedirs(os.path.join("/".join(annotations_jsonpath.split("/")[:-1]), "cache"), exist_ok=True)
         cache_path = os.path.join(
             "/".join(annotations_jsonpath.split("/")[:-1]),
@@ -375,7 +353,7 @@ class RetrievalDatasetVal(Dataset):
         if not os.path.exists(cache_path):
             self.tokenize()
             self.tensorize()
-            # cPickle.dump(self._caption_entries, open(cache_path, "wb"))
+            cPickle.dump(self._caption_entries, open(cache_path, "wb"))
         else:
             print("loading entries from %s" % cache_path)
             self._caption_entries = cPickle.load(open(cache_path, "rb"))
@@ -477,47 +455,53 @@ class RetrievalDatasetVal(Dataset):
     #         image_idx,
     #     )
     
-    # def __len__(self):
-    #     return int(len(self._caption_entries)  * self.num_subiters)
-    
     def __getitem__(self, index):
-        # we iterate through every n captions(a caption set) here.
-        caption_set_size = self.caption_set_size
+        # we iterate through every caption set here.
         caption_idx = int(index / self.num_subiters)
 
-        entry = self._caption_entries[caption_idx * caption_set_size]
-        caption = entry["token"].unsqueeze(0)
-        input_mask = entry["input_mask"].unsqueeze(0)
-        segment_ids = entry["segment_ids"].unsqueeze(0)
+        entry = self._caption_entries[caption_idx * 4]
+        caption = entry["token"]
+        input_mask = entry["input_mask"]
+        segment_ids = entry["segment_ids"]
         img_id = entry["image_id"]
 
-        for i in range(1, caption_set_size):
-            if entry["image_id"] != img_id:
-                print(entry["image_id"], img_id)
-            entry = self._caption_entries[caption_idx * caption_set_size + i]
-            caption = torch.cat((caption, entry["token"].unsqueeze(0)))
-            input_mask = torch.cat((input_mask, entry["input_mask"].unsqueeze(0)))
-            segment_ids = torch.cat((segment_ids, entry["segment_ids"].unsqueeze(0)))
+        for i in range(1, 4):
+            assert entry["image_id"] == img_id
+            entry = self._caption_entries[caption_idx * 4 + i]
+            caption = torch.stack(caption, entry["token"])
+            input_mask = torch.stack(input_mask, entry["input_mask"])
+            segment_ids = torch.stack(segment_ids, entry["segment_ids"])
             
-        image_idx = -1
+        # image_idx = caption_idx
         for i, image_id in enumerate(self._image_entries):
             if image_id == entry["image_id"]:
                 image_idx = i
                 # if i != caption_idx:
                 #     print(i, caption_idx)
                 break
-        
-        if image_id == -1:
-            print(entry["image_id"])
 
         image_entries = self._image_entries[image_idx]
         features_all = self.features_all[image_idx]
         spatials_all = self.spatials_all[image_idx]
         image_mask_all = self.image_mask_all[image_idx]
 
-        target_all = torch.tensor([1,1,0,0]) if caption_set_size == 4 else torch.tensor([1,0])
+        # entry = self._caption_entries[caption_idx]
+        # caption = entry["token"]
+        # input_mask = entry["input_mask"]
+        # segment_ids = entry["segment_ids"]
+
+        # target_all = torch.zeros(len(self._image_entries))
+        # for i, image_id in enumerate(self._image_entries):
+        #     if image_id == entry["image_id"]:
+        #         target_all[i] = 1
+        #         break
+        target_all = torch.tensor([1,1,0,0])
         
         image_id = entry["image_id"]
+        # target_all = torch.zeros(len(image_entries))
+        # for i, image_id in enumerate(image_entries):
+        #     if image_id == entry["image_id"]:
+        #         target_all[i] = 1
 
         return (
             features_all,
@@ -529,14 +513,11 @@ class RetrievalDatasetVal(Dataset):
             target_all,
             caption_idx,
             image_idx,
-            # int(image_id),
+            image_id,
         )
 
     def __len__(self):
-        return int(len(self._caption_entries) / self.caption_set_size \
-                   * self.num_subiters)
-
-
+        return len(self._caption_entries) * self.num_subiters
 
 
 class RetrievalLoader(object):

@@ -8,6 +8,7 @@ import os
 import copy
 import math
 import logging
+from unittest import result
 
 import torch
 from torch import nn
@@ -18,6 +19,7 @@ from .config import BertConfig
 from .utils import PreTrainedModel
 from .losses import pre_vis_criterions, pre_vis_targets
 from .m3p_transformer import M3PTransformerModel
+from scipy import spatial
 
 logger = logging.getLogger(__name__)
 
@@ -1174,6 +1176,7 @@ class BertForVLPreTraining(BertPreTrainedModel):
             if output_all_encoded_layers:
                 return prediction_scores_t, prediction_scores_v_dict, seq_relationship_score, all_attention_mask, \
                        pooled_output, encoded_layers_t, encoded_layers_v
+            # Evaluate zeroshot
             return prediction_scores_t, prediction_scores_v_dict, seq_relationship_score, vqa_score, \
                    all_attention_mask, pooled_output
 
@@ -1270,6 +1273,11 @@ class BertForVLTasks(BertPreTrainedModel):
             vil_prediction = self.clfs_dict[task_id](pooled_output.view(-1, pooled_output.size(1) * 2))
         else:
             vil_prediction = self.clfs_dict[task_id](pooled_output)
+
+        
+        # Calculate vil_prediction using other methods
+        # vil_prediction = F.cosine_similarity(pooled_output_t, pooled_output_v)
+        # vil_prediction = pooled_output_t @ pooled_output_v.T
 
         if output_all_encoded_layers:
             return vil_prediction, vision_prediction, linguistic_prediction, all_attention_mask, \

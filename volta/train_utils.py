@@ -100,7 +100,7 @@ class tbLogger(object):
         self.linePlot(stepId, masked_loss_t, split, self.task_id2name[task_id] + "_masked_loss_t")
         self.linePlot(stepId, masked_loss_v, split, self.task_id2name[task_id] + "_masked_loss_v")
         self.linePlot(stepId, next_sentence_loss, split, self.task_id2name[task_id] + "_next_sentence_loss")
-
+    
     def step_val(self, epochId, loss, score, task_id, batch_size, split):
         self.task_loss_val[task_id] += loss * batch_size
         self.task_score_val[task_id] += score
@@ -119,7 +119,21 @@ class tbLogger(object):
         self.linePlot(iter_id, masked_loss_t, split, self.task_id2name[task_id] + "_masked_loss_t")
         self.linePlot(iter_id, masked_loss_v, split, self.task_id2name[task_id] + "_masked_loss_v")
         self.linePlot(iter_id, next_sentence_loss, split, self.task_id2name[task_id] + "_next_sentence_loss")
+        
+    def step_val_BLA(self, iter_id, rank_acc, cls_acc, next_sentence_loss, task_id, batch_size, split):
+        self.masked_t_loss_val[task_id] += rank_acc
+        self.masked_v_loss_val[task_id] += cls_acc
+        self.next_sentense_loss_val[task_id] += next_sentence_loss
 
+        self.task_step_val[task_id] += self.gradient_accumulation_steps
+        self.task_datasize_val[task_id] += batch_size
+        
+        # plot on tensorboard.
+        self.linePlot(iter_id, rank_acc, split, self.task_id2name[task_id] + "_rank_acc")
+        self.linePlot(iter_id, cls_acc, split, self.task_id2name[task_id] + "_cls_acc")
+        self.linePlot(iter_id, next_sentence_loss, split, self.task_id2name[task_id] + "_next_sentence_loss")
+
+    
     def showLossValAll(self):
         progressInfo = "Eval Ep: %d " % self.epochId
         lossInfo = "Validation "
@@ -252,11 +266,14 @@ class tbLogger(object):
         self.task_norm_tmp = {task_id: 0 for task_id in self.task_ids}
 
 
-def freeze_layers(model):
+def freeze_layers(model, finetune_model = 0):
     fixed_layers = set(model.config.fixed_layers)  # e.g. "bert.embeddings", "bert.v_embeddings.LayerNorm", "bert.encoder.layer.15.output.v_dense"
-    for key, value in dict(model.named_parameters()).items():
+    for i, (key, value) in enumerate(dict(model.named_parameters()).items()):
         for name in fixed_layers:
             if (key + '.').startswith(name + '.'):
+                value.requires_grad = False
+            
+        if finetune_model > 0 and 'cls' not in key:
                 value.requires_grad = False
 
 
@@ -303,7 +320,7 @@ def save(path, logger, epoch_id, model, optimizer, scheduler, global_step, tb_lo
         logger.info("** ** * Saving model * ** ** ")
         model_to_save = model.module if hasattr(model, "module") else model  # Only save the model it-self
         output_model_file = os.path.join(path, "pytorch_model_" + str(epoch_id) + ".bin")
-        torch.save(model_to_save.state_dict(), output_model_file)
+        # torch.save(model_to_save.state_dict(), output_model_file)
         if is_best:
             output_model_file = os.path.join(path, "pytorch_model_best.bin")
             torch.save(model_to_save.state_dict(), output_model_file)

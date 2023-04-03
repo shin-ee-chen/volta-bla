@@ -438,20 +438,22 @@ def LoadDataset(args, config, task_cfg, task_id, split="trainval"):
 
     return batch_size, task2num_iters, dset_train, dset_val, dl_train, dl_val
 
-
-def LoadDatasetEval(args, config, task_cfg, task_id):
+def LoadDatasetTrain(args, config, task_cfg, task_id, load_pair = False, shuffle = False):
     tokenizer = AutoTokenizer.from_pretrained(config.bert_model, do_lower_case=config.do_lower_case)
 
     task = "TASK" + task_id
     task_name = task_cfg[task]["name"]
-
+    train_annotations_jsonpath = args.train_annotations_jsonpath or task_cfg[task]["train_annotations_jsonpath"]
     # initialize the feature reader
-    feats_h5path1 = args.val_features_lmdbpath or task_cfg[task]["features_h5path1"]
+    feats_h5path1 = args.train_features_lmdbpath or task_cfg[task]["features_h5path1"]
     feats_h5path2 = task_cfg[task]["features_h5path2"]
     features_reader1 = ImageFeaturesH5Reader(feats_h5path1, config, args.in_memory) if feats_h5path1 != "" else None
     features_reader2 = ImageFeaturesH5Reader(feats_h5path2, config, args.in_memory) if feats_h5path2 != "" else None
 
-    batch_size = task_cfg[task].get("eval_batch_size", args.batch_size)
+    batch_size = task_cfg[task].get("train_batch_size", args.train_batch_size)
+    if load_pair and batch_size > 1:
+        batch_size = int(batch_size / args.train_num_set_size)
+        
     if args.local_rank != -1:
         batch_size = int(batch_size / dist.get_world_size())
 
@@ -462,6 +464,86 @@ def LoadDatasetEval(args, config, task_cfg, task_id):
     else:
         eval_split = task_cfg[task]["val_split"]
 
+    if task_name.startswith("Retrieval"):
+        dset_val = DatasetMapEval[task_name](
+            task=task_cfg[task]["name"],
+            dataroot=task_cfg[task]["dataroot"],
+            annotations_jsonpath=train_annotations_jsonpath,
+            split=eval_split,
+            image_features_reader=features_reader1,
+            gt_image_features_reader=features_reader2,
+            tokenizer=tokenizer,
+            bert_model=config.bert_model,
+            padding_index=tokenizer.pad_token_id,
+            max_seq_length=task_cfg[task]["max_seq_length"],
+            max_region_num=task_cfg[task]["max_region_num"],
+            num_locs=config.num_locs,
+            add_global_imgfeat=config.add_global_imgfeat,
+            append_mask_sep=(config.fusion_method == 'vl-bert_vqa'),
+            num_subiters=args.num_subiters,
+            caption_set_size = args.train_num_set_size
+        )
+    else:
+        dset_val = DatasetMapEval[task_name](
+            task=task_cfg[task]["name"],
+            dataroot=task_cfg[task]["dataroot"],
+            annotations_jsonpath=train_annotations_jsonpath,
+            split=eval_split,
+            image_features_reader=features_reader1,
+            gt_image_features_reader=features_reader2,
+            tokenizer=tokenizer,
+            bert_model=config.bert_model,
+            padding_index=tokenizer.pad_token_id,
+            max_seq_length=task_cfg[task]["max_seq_length"],
+            max_region_num=task_cfg[task]["max_region_num"],
+            num_locs=config.num_locs,
+            add_global_imgfeat=config.add_global_imgfeat,
+            append_mask_sep=(config.fusion_method == 'vl-bert_vqa'),
+        )
+
+    dl_val = DataLoader(
+        dset_val,
+        shuffle=shuffle,
+        batch_size=batch_size,
+        num_workers=args.num_val_workers,
+        pin_memory=True,
+        drop_last=args.drop_last,
+    )
+    task2num_iters = {task: len(dl_val)}
+    
+    # if load_pair:
+    #     batch_size = batch_size
+    
+    return batch_size, task2num_iters, dset_val, dl_val
+
+
+def LoadDatasetTest(args, config, task_cfg, task_id, load_pair = False):
+    tokenizer = AutoTokenizer.from_pretrained(config.bert_model, do_lower_case=config.do_lower_case)
+
+    task = "TASK" + task_id
+    task_name = task_cfg[task]["name"]
+    val_annotations_jsonpath = args.test_annotations_jsonpath or task_cfg[task]["test_annotations_jsonpath"]
+    # initialize the feature reader
+    feats_h5path1 = args.test_features_lmdbpath or task_cfg[task]["features_h5path1"]
+    feats_h5path2 = task_cfg[task]["features_h5path2"]
+    features_reader1 = ImageFeaturesH5Reader(feats_h5path1, config, args.in_memory) if feats_h5path1 != "" else None
+    features_reader2 = ImageFeaturesH5Reader(feats_h5path2, config, args.in_memory) if feats_h5path2 != "" else None
+
+    batch_size = task_cfg[task].get("eval_batch_size", args.eval_batch_size)
+    if load_pair:
+        batch_size = int(batch_size / args.eval_num_set_size)
+        
+    if args.local_rank != -1:
+        batch_size = int(batch_size / dist.get_world_size())
+
+    logger.info("Loading %s Dataset with batch size %d" % (task_name, batch_size))
+    from volta.datasets import DatasetMapEval
+    if args.split:
+        eval_split = args.split
+    else:
+        eval_split = task_cfg[task]["val_split"]
+        
+    
     if task_name.startswith("Retrieval"):
         dset_val = DatasetMapEval[task_name](
             task=task_cfg[task]["name"],
@@ -479,6 +561,7 @@ def LoadDatasetEval(args, config, task_cfg, task_id):
             add_global_imgfeat=config.add_global_imgfeat,
             append_mask_sep=(config.fusion_method == 'vl-bert_vqa'),
             num_subiters=args.num_subiters,
+            caption_set_size = args.eval_num_set_size
         )
     else:
         dset_val = DatasetMapEval[task_name](
@@ -507,7 +590,90 @@ def LoadDatasetEval(args, config, task_cfg, task_id):
         drop_last=args.drop_last,
     )
     task2num_iters = {task: len(dl_val)}
+    
+    if load_pair:
+        batch_size = batch_size
+    
+    return batch_size, task2num_iters, dset_val, dl_val
 
+
+def LoadDatasetEval(args, config, task_cfg, task_id, load_pair = False):
+    tokenizer = AutoTokenizer.from_pretrained(config.bert_model, do_lower_case=config.do_lower_case)
+
+    task = "TASK" + task_id
+    task_name = task_cfg[task]["name"]
+    val_annotations_jsonpath = args.val_annotations_jsonpath or task_cfg[task]["val_annotations_jsonpath"]
+    # initialize the feature reader
+    feats_h5path1 = args.val_features_lmdbpath or task_cfg[task]["features_h5path1"]
+    feats_h5path2 = task_cfg[task]["features_h5path2"]
+    features_reader1 = ImageFeaturesH5Reader(feats_h5path1, config, args.in_memory) if feats_h5path1 != "" else None
+    features_reader2 = ImageFeaturesH5Reader(feats_h5path2, config, args.in_memory) if feats_h5path2 != "" else None
+
+    batch_size = task_cfg[task].get("eval_batch_size", args.eval_batch_size)
+    if load_pair:
+        batch_size = int(batch_size / args.eval_num_set_size)
+        
+    if args.local_rank != -1:
+        batch_size = int(batch_size / dist.get_world_size())
+
+    logger.info("Loading %s Dataset with batch size %d" % (task_name, batch_size))
+    from volta.datasets import DatasetMapEval
+    if args.split:
+        eval_split = args.split
+    else:
+        eval_split = task_cfg[task]["val_split"]
+        
+
+    if task_name.startswith("Retrieval"):
+        dset_val = DatasetMapEval[task_name](
+            task=task_cfg[task]["name"],
+            dataroot=task_cfg[task]["dataroot"],
+            annotations_jsonpath=val_annotations_jsonpath,
+            split=eval_split,
+            image_features_reader=features_reader1,
+            gt_image_features_reader=features_reader2,
+            tokenizer=tokenizer,
+            bert_model=config.bert_model,
+            padding_index=tokenizer.pad_token_id,
+            max_seq_length=task_cfg[task]["max_seq_length"],
+            max_region_num=task_cfg[task]["max_region_num"],
+            num_locs=config.num_locs,
+            add_global_imgfeat=config.add_global_imgfeat,
+            append_mask_sep=(config.fusion_method == 'vl-bert_vqa'),
+            num_subiters=args.num_subiters,
+            caption_set_size = args.eval_num_set_size
+        )
+    else:
+        dset_val = DatasetMapEval[task_name](
+            task=task_cfg[task]["name"],
+            dataroot=task_cfg[task]["dataroot"],
+            annotations_jsonpath=val_annotations_jsonpath,
+            split=eval_split,
+            image_features_reader=features_reader1,
+            gt_image_features_reader=features_reader2,
+            tokenizer=tokenizer,
+            bert_model=config.bert_model,
+            padding_index=tokenizer.pad_token_id,
+            max_seq_length=task_cfg[task]["max_seq_length"],
+            max_region_num=task_cfg[task]["max_region_num"],
+            num_locs=config.num_locs,
+            add_global_imgfeat=config.add_global_imgfeat,
+            append_mask_sep=(config.fusion_method == 'vl-bert_vqa'),
+        )
+
+    dl_val = DataLoader(
+        dset_val,
+        shuffle=False,
+        batch_size=batch_size,
+        num_workers=args.num_val_workers,
+        pin_memory=True,
+        drop_last=args.drop_last,
+    )
+    task2num_iters = {task: len(dl_val)}
+    
+    if load_pair:
+        batch_size = batch_size
+    
     return batch_size, task2num_iters, dset_val, dl_val
 
 

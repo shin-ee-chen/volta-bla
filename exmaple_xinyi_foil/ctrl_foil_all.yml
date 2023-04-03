@@ -1,0 +1,17 @@
+TASK8:
+  name: RetrievalFlickr30k
+  type: VL-logit
+  num_labels: 1
+  loss: CrossEntropyLoss
+  process: retrieval
+  task_id: 8
+  dataroot: /home/xinyi/datasets/FOIL
+  features_h5path1: /home/xinyi/datasets/FOIL/imgfeats_all/volta/foil_feat.lmdb
+  features_h5path2: ''
+  train_annotations_jsonpath: ''
+  val_annotations_jsonpath: /home/xinyi/datasets/FOIL/annotations_all/foil_process_ann_all.jsonl
+  max_seq_length: 38
+  max_region_num: 36
+  batch_size: 64
+  train_split: ''
+  val_split: test
