@@ -25,7 +25,6 @@ from volta.config import BertConfig, M3PConfig
 from volta.encoders import BertForVLPreTraining, BertForVLTasks, M3PForVLTasks
 from volta.task_utils import LoadDatasetTest
 
-import wandb
 import analysis_tools as tools
 
 
@@ -44,44 +43,40 @@ def parse_args():
 
     # Model
     parser.add_argument("--from_pretrained", 
-                        default="/root/autodl-tmp/volta/checkpoints/mmdata/ctrl_vilbert/RetrievalMMdata_ctrl_vilbert_base/pytorch_model_9.bin", 
+                        default="/home/xchen/volta-bla/checkpoints/mmdata/ctrl_vilbert/RetrievalMMdata_ctrl_vilbert_base/pytorch_model_9.bin", 
                         type=str,
                         help="Bert pre-trained model selected in the list: bert-base-uncased, "
                         "bert-large-uncased, bert-base-cased, bert-base-multilingual, bert-base-chinese.")
-    # parser.add_argument("--from_pretrained", default="/root/autodl-tmp/volta/checkpoints/mmdata/ctrl_vilbert/RetrievalMMdata_ctrl_vilbert_base/pytorch_model_9.bin", type=str,
+    # parser.add_argument("--from_pretrained", default="/home/xchen/volta-bla/checkpoints/mmdata/ctrl_vilbert/RetrievalMMdata_ctrl_vilbert_base/pytorch_model_9.bin", type=str,
     #                     help="Bert pre-trained model selected in the list: bert-base-uncased, "
     #                             "bert-large-uncased, bert-base-cased, bert-base-multilingual, bert-base-chinese.")
-    # parser.add_argument("--from_pretrained", default="/root/autodl-tmp/volta/exmaple_xinyi_foil/checkpoints/ctrl_vilbert_base/FOIL_annotations_all/pytorch_model_best.bin", type=str,
+    # parser.add_argument("--from_pretrained", default="/home/xchen/volta-bla/exmaple_xinyi_foil/checkpoints/ctrl_vilbert_base/FOIL_annotations_all/pytorch_model_best.bin", type=str,
     #                     help="Bert pre-trained model selected in the list: bert-base-uncased, "
     #                             "bert-large-uncased, bert-base-cased, bert-base-multilingual, bert-base-chinese.")
-    parser.add_argument("--config_file", default="/root/autodl-tmp/volta/config/ctrl_vilbert_base.json", type=str,
+    parser.add_argument("--config_file", default="/home/xchen/volta-bla/config/ctrl_vilbert_base.json", type=str,
                         help="The config file which specified the model details.")
     parser.add_argument("--is_m3p", action='store_true', default=False,
                         help="Use M3P.")
     # Output
-    parser.add_argument("--output_dir", default="/root/autodl-tmp/volta/exmaple_xinyi_bla_train/results/check",
+    parser.add_argument("--output_dir", default="/home/xchen/volta-bla/exmaple_xinyi_bla_train/results/check",
                         type=str,
                         help="The output directory where the model checkpoints will be written.")
     parser.add_argument("--save_name", default="", type=str,
                         help="save name for training.")
     # Task
-    # parser.add_argument("--tasks_config_file", default="/root/autodl-tmp/volta/exmaple_xinyi_bla_train/task_configs/ctrl_active_tasks.yml", type=str,
-    #                     help="The config file which specified the tasks details.")
-    # parser.add_argument("--eval_num_set_size", default=4, type=int,
-    #                     help="The number of sentences in one caption set of validation set")
-    parser.add_argument("--tasks_config_file", default="/root/autodl-tmp/volta/exmaple_xinyi_bla/ctrl_coordination_tasks.yml", type=str,
+    parser.add_argument("--tasks_config_file", default="/home/xchen/volta-bla/example_xinyi_bla_eval/task_configs/ctrl_rc_tasks.yml", type=str,
                         help="The config file which sp")
     parser.add_argument("--eval_num_set_size", default=4, type=int,
                         help="The number of sentences in one caption set of validation set")
     parser.add_argument("--task", default="8", type=str,
                         help="training task number")
-    # parser.add_argument("--val_annotations_jsonpath", 
-    #                     default="/root/autodl-tmp/datasets/BLA/annotations/active_passive_captions_gruen_strict_ann.jsonl", 
-    #                     type=str)
+    parser.add_argument("--val_annotations_jsonpath", 
+                        default="", 
+                        type=str)
     parser.add_argument("--test_annotations_jsonpath", default="", type=str)
-    # parser.add_argument("--val_features_lmdbpath", 
-    #                     default="/root/autodl-tmp/datasets/BLA/imgfeats/volta/genome_feat.lmdb", 
-    #                     type=str)
+    parser.add_argument("--val_features_lmdbpath", 
+                        default="", 
+                        type=str)
     parser.add_argument("--test_features_lmdbpath", default="", type=str)
     parser.add_argument("--num_subiters", default=1, type=int)
     parser.add_argument("--caps_per_image", default=5, type=int,

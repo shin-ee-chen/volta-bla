@@ -51,9 +51,9 @@ def parse_args():
     dataset_type = "finetune_random/active_passive"
     
     # Data
-    parser.add_argument("--tasks_config_file", default="/root/autodl-tmp/volta/exmaple_xinyi_bla_train/task_configs/ctrl_coord_tasks_100_1.yml", type=str,
+    parser.add_argument("--tasks_config_file", default="/home/xchen/volta-bla/exmaple_xinyi_bla_train/task_configs/ctrl_active_tasks.yml", type=str,
                         help="The config file which specified the tasks details.")
-    # parser.add_argument("--tasks_config_file", default="/root/autodl-tmp/volta/exmaple_xinyi_bla_train/task_configs/ctrl_active_tasks.yml", type=str,
+    # parser.add_argument("--tasks_config_file", default="/home/xchen/volta-bla/exmaple_xinyi_bla_train/task_configs/ctrl_active_tasks.yml", type=str,
     #                     help="The config file which specified the tasks details.")
     parser.add_argument("--train_num_set_size", default=2, type=int,
                         help="The number of sentences in one caption set of training set")
@@ -82,10 +82,10 @@ def parse_args():
                         help="whether to drop last incomplete batch")
     
     # Model
-    parser.add_argument("--from_pretrained", default="/root/autodl-tmp/volta/checkpoints/mmdata/ctrl_vilbert/RetrievalMMdata_ctrl_vilbert_base/pytorch_model_9.bin", type=str,
+    parser.add_argument("--from_pretrained", default="/home/xchen/volta-bla/checkpoints/mmdata/ctrl_vilbert/RetrievalMMdata_ctrl_vilbert_base/pytorch_model_9.bin", type=str,
                         help="Bert pre-trained model selected in the list: bert-base-uncased, "
                         "bert-large-uncased, bert-base-cased, bert-base-multilingual, bert-base-chinese.")
-    parser.add_argument("--config_file", type=str, default="/root/autodl-tmp/volta/config/ctrl_vilbert_base.json",
+    parser.add_argument("--config_file", type=str, default="/home/xchen/volta-bla/config/ctrl_vilbert_base.json",
                         help="The config file which specified the model details.")
     parser.add_argument("--resume_file", default="", type=str,
                         help="Resume from checkpoint")
@@ -93,13 +93,13 @@ def parse_args():
                         help="Whether to save model")
 
     # Output
-    parser.add_argument("--output_dir", default="/root/autodl-tmp/volta/exmaple_xinyi_bla_train/checkpoints", type=str,
+    parser.add_argument("--output_dir", default="/home/xchen/volta-bla/exmaple_xinyi_bla_train/checkpoints", type=str,
                         help="The output directory where the model checkpoints will be written.")
-    parser.add_argument("--logdir", default="/root/autodl-tmp/volta/exmaple_xinyi_bla_train/logs", type=str,
+    parser.add_argument("--logdir", default="/home/xchen/volta-bla/exmaple_xinyi_bla_train/logs", type=str,
                         help="The logging directory where the training logs will be written.")
-    # parser.add_argument("--output_dir", default="/root/autodl-tmp/volta/exmaple_xinyi_foil/checkpoints", type=str,
+    # parser.add_argument("--output_dir", default="/home/xchen/volta-bla/exmaple_xinyi_foil/checkpoints", type=str,
     #                     help="The output directory where the model checkpoints will be written.")
-    # parser.add_argument("--logdir", default="/root/autodl-tmp/volta/exmaple_xinyi_foil/logs", type=str,
+    # parser.add_argument("--logdir", default="/home/xchen/volta-bla/exmaple_xinyi_foil/logs", type=str,
     #                     help="The logging directory where the training logs will be written.")
     
     # Text
@@ -374,7 +374,7 @@ def main():
     freeze_layers(model, args.freeze_before_layer)
     no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
     # bert_weight_name = json.load(open("config/" + args.from_pretrained + "_weight_name.json", "r"))
-    # bert_weight_name = json.load(open("/root/autodl-tmp/volta/config/bert-base-uncased_weight_name.json", "r"))
+    # bert_weight_name = json.load(open("/home/xchen/volta-bla/config/bert-base-uncased_weight_name.json", "r"))
     if not args.from_pretrained:
         param_optimizer = list(model.named_parameters())
         optimizer_grouped_parameters = [
