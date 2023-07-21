@@ -528,8 +528,8 @@ class RetrievalDatasetVal(Dataset):
             segment_ids,
             target_all,
             caption_idx,
-            image_idx,
-            # int(image_id),
+            # image_idx,
+            int(image_id),
         )
 
     def __len__(self):

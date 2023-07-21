@@ -10,7 +10,10 @@ TASK8:
   features_h5path2: ''
   train_annotations_jsonpath: /home/xchen/datasets/BLA_finetune_0215/finetune_random/coord/train_ann.jsonl
   val_annotations_jsonpath: /home/xchen/datasets/BLA_finetune_0215/finetune_random/coord/valid_ann.jsonl
-  test_annotations_jsonpath: /home/xchen/datasets/BLA_finetune_0215/finetune_random/coord/test_ann.jsonl
+  test_annotations_jsonpath: ''
+  ap_annotations_jsonpath: /home/xchen/datasets/BLA_finetune_0215/finetune_random/active_passive/test_ann.jsonl
+  coord_annotations_jsonpath: /home/xchen/datasets/BLA_finetune_0215/finetune_random/coord/test_ann.jsonl
+  rc_annotations_jsonpath: /home/xchen/datasets/BLA_finetune_0215/finetune_random/rc/test_ann.jsonl
   max_seq_length: 38
   max_region_num: 36
   batch_size: 64

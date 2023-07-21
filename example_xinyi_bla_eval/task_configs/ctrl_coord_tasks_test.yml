@@ -5,17 +5,14 @@ TASK8:
   loss: CrossEntropyLoss
   process: retrieval
   task_id: 8
-  dataroot: /home/xchen/datasets/BLA_finetune_0215
+  dataroot: /home/xchen/datasets/BLA
   features_h5path1: /home/xchen/datasets/BLA/imgfeats/volta/genome_feat.lmdb
   features_h5path2: ''
-  train_annotations_jsonpath: /home/xchen/datasets/BLA_finetune_0215/finetune_random/coord/train_ann.jsonl
-  val_annotations_jsonpath: /home/xchen/datasets/BLA_finetune_0215/finetune_random/coord/valid_ann.jsonl
+  train_annotations_jsonpath: ''
+  val_annotations_jsonpath: ''
   test_annotations_jsonpath: /home/xchen/datasets/BLA_finetune_0215/finetune_random/coord/test_ann.jsonl
-  max_seq_length: 38
+  max_seq_length: 20
   max_region_num: 36
   batch_size: 64
   train_split: ''
-  train_split: train
   val_split: test
-  zero_shot: True
-  format: 'lmdb'

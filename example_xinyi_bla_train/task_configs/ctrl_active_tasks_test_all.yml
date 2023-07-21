@@ -8,12 +8,12 @@ TASK8:
   dataroot: /home/xchen/datasets/BLA_finetune_0215
   features_h5path1: /home/xchen/datasets/BLA/imgfeats/volta/genome_feat.lmdb
   features_h5path2: ''
-  train_annotations_jsonpath: /home/xchen/datasets/BLA_finetune_0215/finetune_random/rc/train_ann_20_1.jsonl
-  val_annotations_jsonpath: /home/xchen/datasets/BLA_finetune_0215/finetune_random/rc/valid_ann.jsonl
-  test_annotations_jsonpath: /home/xchen/datasets/BLA_finetune_0215/finetune_random/rc/test_ann.jsonl
+  train_annotations_jsonpath: /home/xchen/datasets/BLA_finetune_0215/finetune_random/active_passive/train_ann.jsonl
+  val_annotations_jsonpath: /home/xchen/datasets/BLA_finetune_0215/finetune_random/active_passive/valid_ann.jsonl
+  test_annotations_jsonpath: /home/xchen/datasets/BLA/annotations/active_passive_captions_gruen_strict_ann.jsonl
   max_seq_length: 38
   max_region_num: 36
-  batch_size: 64
+  batch_size: 16
   train_split: ''
   train_split: train
   val_split: test
