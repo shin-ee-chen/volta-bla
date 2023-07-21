@@ -20,6 +20,7 @@ from easydict import EasyDict as edict
 import numpy as np
 from tqdm import tqdm
 import copy
+import wandb
 
 import torch
 import torch.distributed as dist
@@ -51,10 +52,8 @@ def parse_args():
     dataset_type = "finetune_random/active_passive"
     
     # Data
-    parser.add_argument("--tasks_config_file", default="/home/xchen/volta-bla/exmaple_xinyi_bla_train/task_configs/ctrl_active_tasks.yml", type=str,
+    parser.add_argument("--tasks_config_file", default="/home/xchen/volta-bla/example_xinyi_bla_train/task_configs/ctrl_bla_tasks.yml", type=str,
                         help="The config file which specified the tasks details.")
-    # parser.add_argument("--tasks_config_file", default="/home/xchen/volta-bla/exmaple_xinyi_bla_train/task_configs/ctrl_active_tasks.yml", type=str,
-    #                     help="The config file which specified the tasks details.")
     parser.add_argument("--train_num_set_size", default=2, type=int,
                         help="The number of sentences in one caption set of training set")
     parser.add_argument("--eval_num_set_size", default=4, type=int,
@@ -71,6 +70,10 @@ def parse_args():
     
     parser.add_argument("--test_annotations_jsonpath", default="", type=str)
     parser.add_argument("--test_features_lmdbpath", default="", type=str)
+    
+    parser.add_argument("--ap_annotations_jsonpath", default="", type=str)
+    parser.add_argument("--coord_annotations_jsonpath", default="", type=str)
+    parser.add_argument("--rc_annotations_jsonpath", default="", type=str)
     
     parser.add_argument("--train_split", default="", type=str)
     parser.add_argument("--val_split", default="test", type=str)
@@ -93,15 +96,11 @@ def parse_args():
                         help="Whether to save model")
 
     # Output
-    parser.add_argument("--output_dir", default="/home/xchen/volta-bla/exmaple_xinyi_bla_train/checkpoints", type=str,
+    parser.add_argument("--output_dir", default="/home/xchen/volta-bla/example_xinyi_bla_train/checkpoints", type=str,
                         help="The output directory where the model checkpoints will be written.")
-    parser.add_argument("--logdir", default="/home/xchen/volta-bla/exmaple_xinyi_bla_train/logs", type=str,
+    parser.add_argument("--logdir", default="/home/xchen/volta-bla/example_xinyi_bla_train/logs", type=str,
                         help="The logging directory where the training logs will be written.")
-    # parser.add_argument("--output_dir", default="/home/xchen/volta-bla/exmaple_xinyi_foil/checkpoints", type=str,
-    #                     help="The output directory where the model checkpoints will be written.")
-    # parser.add_argument("--logdir", default="/home/xchen/volta-bla/exmaple_xinyi_foil/logs", type=str,
-    #                     help="The logging directory where the training logs will be written.")
-    
+   
     # Text
     parser.add_argument("--max_seq_length", default=20, type=int,
                         help="The maximum total input sequence length after WordPiece tokenization. \n"
@@ -114,7 +113,8 @@ def parse_args():
                         help="Total batch size for training.")
     parser.add_argument("--eval_batch_size", default=1, type=int,
                         help="Total batch size for training.")
-    
+    parser.add_argument("--evaluate_on_bla_benchmark", action="store_true",
+                        help="Whether to evaluate the model on all bla test sets.")
     
     parser.add_argument("--learning_rate", default=4e-5, type=float,
                         help="The initial learning rate for Adam.")
@@ -122,6 +122,10 @@ def parse_args():
                         help="Number of updates steps to accumulate before performing a backward/update pass.")
     parser.add_argument("--num_train_epochs", default=10, type=float,
                         help="Total number of training epochs to perform.")
+    
+    parser.add_argument("--validation_metrics", default="cls_acc", type=str,  choices=['rank_acc', 'cls_acc'],
+                        help="Performance metrics used for validation and best model selection")
+    
     # Scheduler
     parser.add_argument("--warmup_proportion", default=0.1, type=float,
                         help="Proportion of training to perform linear learning rate warmup for. "
@@ -159,7 +163,6 @@ def parse_args():
                         help="Clip gradients within the specified range.")
 
     return parser.parse_args()
-
 
 
 def evaluate_model(dl_val, task2num_iters, task, model, device):
@@ -247,7 +250,7 @@ def evaluate_model(dl_val, task2num_iters, task, model, device):
         # score_statistics["model"] = model_name
         # score_statistics["task"] = task_name
         # json.dump(score_statistics, open(json_path + "_result.json", "w"), indent=2)
-        # print("Evaluation accuracy:", statistics['sent_acc'], score_statistics)
+        # print("Evaluation accuracy:", statistics['cls_acc'], score_statistics)
     else:
         statistics = {}
         correct_cnt = ((rank_predictions - 1) == (1 - targets.reshape(-1, 2))).sum() / 2
@@ -264,19 +267,19 @@ def evaluate_model(dl_val, task2num_iters, task, model, device):
 
 def main():
     args = parse_args()
-    # if args.tasks_config_file[-1] == '/':
-    #     args.tasks_config_file = args.tasks_config_file[:-1]
+    
     dataset_type = args.tasks_config_file.split('/')[-1].split(".")[0]
     freeze_type = "last" if args.freeze_before_layer > 0 else "all"
     model_type = args.config_file.split("/")[-1].split(".")[0]
     # task name, split type, freeze layer
     hyperparas = str(args.learning_rate) + "_" \
                  + str(args.train_batch_size)
-    model_name = args.from_pretrained.split('/')[-3]
-    model_name = dataset_type + "_" + freeze_type + "_" + \
-                    hyperparas+ "_" + str(args.seed) + "_" + model_name
+    pretrained_model_name = args.from_pretrained.split('/')[-3]
     
-    json_path = os.path.join(args.output_dir, model_name)
+    model_name = dataset_type + "_" + freeze_type + "_" + \
+                    hyperparas+ "_" + str(args.seed) + "_" + pretrained_model_name
+    
+    # json_path = os.path.join(args.output_dir, model_name)
     
     args.logdir = os.path.join(args.logdir, model_name)
     # args.save_model = True
@@ -323,7 +326,20 @@ def main():
         args.train_batch_size = args.train_batch_size // num_replicas
         args.num_workers = args.num_workers // num_replicas
         cache = cache // num_replicas
-
+        
+        
+    run = wandb.init(
+        # set the wandb project where this run will be logged
+        project="bla-2023",
+    
+        # track hyperparameters and run metadata
+        config={
+        "dataset": dataset_type,
+        "model_name": model_name
+        }
+        )         
+    
+    
     # Seed
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -342,14 +358,32 @@ def main():
     task_ids = [task]
     args.cache = 5000
     
-    train_batch_size, task2num_iters, dset_train, dl_train = LoadDatasetTrain(args, config, task_cfg, args.task, True, True)
-    test_batch_size, task2num_iters, dset_test, dl_test = LoadDatasetTest(args, config, task_cfg, args.task, False)
-    val_batch_size, task2num_iters, dset_val, dl_val = LoadDatasetEval(args, config, task_cfg, args.task, False)
+    train_batch_size, train_task2num_iters, dset_train, dl_train = LoadDatasetTrain(args, config, task_cfg, args.task, True, True)
+    val_batch_size, val_task2num_iters, dset_val, dl_val = LoadDatasetEval(args, config, task_cfg, args.task, False)
+    
+    # args.evaluate_on_bla_benchmark = True
+    
+    if args.evaluate_on_bla_benchmark:
+        task = "TASK" + task_id
+        args.test_annotations_jsonpath = args.ap_annotations_jsonpath or \
+            task_cfg["TASK" + args.task]["ap_annotations_jsonpath"]
+        _, test_task2num_iters, _, ap_dl_test = LoadDatasetTest(args, config, task_cfg, args.task, False)
+        
+        args.test_annotations_jsonpath = args.coord_annotations_jsonpath or \
+            task_cfg["TASK" + args.task]["coord_annotations_jsonpath"]
+        _, test_task2num_iters, _, coord_dl_test = LoadDatasetTest(args, config, task_cfg, args.task, False)
+        
+        args.test_annotations_jsonpath = args.rc_annotations_jsonpath or \
+            task_cfg["TASK" + args.task]["rc_annotations_jsonpath"]
+        _, test_task2num_iters, _, rc_dl_test = LoadDatasetTest(args, config, task_cfg, args.task, False)
+        
+    else:
+        test_batch_size, test_task2num_iters, dset_test, dl_test = LoadDatasetTest(args, config, task_cfg, args.task, False)
    
     # Logging
     logdir = args.logdir
     if default_gpu:
-        tb_logger = tbLogger(logdir, save_path, task_names, task_ids, task2num_iters, args.grad_acc_steps)
+        tb_logger = tbLogger(logdir, save_path, task_names, task_ids, train_task2num_iters, args.grad_acc_steps)
     else:
         tb_logger = None
         
@@ -437,35 +471,88 @@ def main():
         logger.info("  Batch size = %d", args.train_batch_size)
         logger.info("  Num steps = %d", num_train_optimization_steps)
     
-    # Evaluation before training (Validation)
-    numBatches = len(dl_test)
-    results, pair_match_loss, masked_loss_t, masked_loss_v = evaluate_model(dl_test, 
-                                                                            task2num_iters, 
+    # Evaluation before training (Test)
+    output_records = []
+    zero_shot_performance = 0
+    if args.evaluate_on_bla_benchmark:
+        # Active passive
+        results, pair_match_loss, masked_loss_t, masked_loss_v = evaluate_model(ap_dl_test, 
+                                                                            test_task2num_iters, 
                                                                             task, 
                                                                             model, 
                                                                             device)
-    output_records = []
-    print(f"Test Set Validation, epoch = {-1}, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}")
-    output_records.append(f"Test Set Validation, epoch = {-1}, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}, {results}")
+    
+        print(f"AP Test Set Validation, epoch = {-1}, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}")
+        output_records.append(f"AP Test Set Validation, epoch = {-1}, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}, {results}")
+        ap_zero_shot_performance = results['cls_acc']
+        
+        # Coordination
+        results, pair_match_loss, masked_loss_t, masked_loss_v = evaluate_model(coord_dl_test, 
+                                                                            test_task2num_iters, 
+                                                                            task, 
+                                                                            model, 
+                                                                            device)
+    
+        print(f"Coordination Test Set Validation, epoch = {-1}, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}")
+        output_records.append(f"Coordination Test Set Validation, epoch = {-1}, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}, {results}")
+        coord_zero_shot_performance = results['cls_acc']
+        
+        # Relative Clause
+        results, pair_match_loss, masked_loss_t, masked_loss_v = evaluate_model(rc_dl_test, 
+                                                                            test_task2num_iters, 
+                                                                            task, 
+                                                                            model, 
+                                                                            device)
+    
+        print(f"RC Test Set Validation, epoch = {-1}, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}")
+        output_records.append(f"RC Test Set Validation, epoch = {-1}, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}, {results}")
+        rc_zero_shot_performance = results['cls_acc']
+        
+        metrics = {"test/epoch": 0,
+                   "test/ap_performance ": ap_zero_shot_performance, 
+                   "test/coord_performance ": coord_zero_shot_performance, 
+                   "test/rc_performance ": rc_zero_shot_performance, 
+                  }
+        
+        
+    else:
+        results, pair_match_loss, masked_loss_t, masked_loss_v = evaluate_model(dl_test, 
+                                                                            test_task2num_iters, 
+                                                                            task, 
+                                                                            model, 
+                                                                            device)
+    
+        zero_shot_performance = results['cls_acc']
+        metrics = {"test/epoch": 0,
+                   "test/rank_acc ": results['rank_acc'], 
+                   "test/cls_acc": results['cls_acc'], 
+                   "test/loss": pair_match_loss.item(),
+                  }
+        wandb.log(metrics)
+        print(f"Test Set Evaluation, epoch = {-1}, {results}")
+        output_records.append(f"Test Set Evaluation, epoch = {-1}, {results}")
+    
     # Evaluation before training (Validation)
     numBatches = len(dl_val)
     results, pair_match_loss, masked_loss_t, masked_loss_v = evaluate_model(dl_val, 
-                                                                            task2num_iters, 
+                                                                            val_task2num_iters, 
                                                                             task, 
                                                                             model, 
                                                                             device)
     
     print(f"epoch = {-1}, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}")
-    output_records.append(f"epoch = {-1}, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}")
-    best_rank_model = {"epoch": -1, "model": model, "result": results['rank_acc']}
-    best_loss_model = {"epoch": -1, "model": model, "result": pair_match_loss}
+    # output_records.append(f"epoch = {-1}, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}")
+    best_model = copy.deepcopy(model)
+    current_result = results['rank_acc'] if args.validation_metrics == "rank_acc" else results["cls_acc"]
+    best_performance_model = {"epoch": -1, "model": best_model, "result": current_result}
+    lowest_loss_model = {"epoch": -1, "model": best_model, "result": pair_match_loss}
     
     # Train
     torch.set_grad_enabled(True)
     for epoch_id in range(start_epoch, int(args.num_train_epochs)):
         model.train()
         train_pair_loss = []
-        for step, batch in tqdm(enumerate(dl_train), total=task2num_iters[task]):
+        for step, batch in tqdm(enumerate(dl_train), total=train_task2num_iters[task]):
             iter_id = start_iter_id + step + (epoch_id * len(dl_train))
             batch = tuple(t.cuda(device=device, non_blocking=True) for t in batch)
             features, spatials, image_mask, question, input_mask, \
@@ -531,31 +618,47 @@ def main():
 
             if (step % (20 * args.grad_acc_steps) == 0) and step != 0 and default_gpu:
                 tb_logger.showLossTrainCC()
+            
+            metrics = {"train/epoch": epoch_id,
+                #    "train/rank_acc ": results['rank_acc'], 
+                #    "train/cls_acc": results['cls_acc'], 
+                   "train/loss": pair_match_loss.item(),
+                  }
 
         # Do the evaluation
         numBatches = len(dl_val)
         results, pair_match_loss, masked_loss_t, masked_loss_v = evaluate_model(dl_val, 
-                                                                                task2num_iters, 
+                                                                                val_task2num_iters, 
                                                                                 task, 
                                                                                 model, 
                                                                                 device)
-        print(f"epoch = {epoch_id}, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}")
-        output_records.append(f"epoch = {epoch_id}, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}")
-            
+
+        metrics = {"val/epoch": epoch_id,
+                   "val/rank_acc ": results['rank_acc'], 
+                   "val/cls_acc": results['cls_acc'], 
+                   "val/loss": pair_match_loss.item(),
+                  }
+        print(metrics)
+        # output_records.append(metrics)
+        wandb.log(metrics)
+        
+        current_result = results['rank_acc'] if args.validation_metrics == "rank_acc" else results["cls_acc"]
+        
         # Save best model
-        if results['rank_acc'] > best_rank_model["result"]:
-            best_rank_model["model"] = copy.deepcopy(model)
-            best_rank_model["result"] = results['rank_acc']
-            best_rank_model["epoch"] = epoch_id
+        if current_result > best_performance_model["result"]:
+            best_performance_model["model"] = copy.deepcopy(model)
+            best_performance_model["result"] =current_result
+            best_performance_model["epoch"] = epoch_id
         
             if args.save_model:
-                save(save_path, logger, epoch_id, model, optimizer, scheduler, global_step, tb_logger, default_gpu, best_rank_model["result"], is_best=True)
+                save(save_path, logger, epoch_id, model, optimizer, scheduler, global_step, tb_logger, \
+                    default_gpu, best_performance_model["result"], is_best=True)
             # save(save_path, logger, -1, model, optimizer, scheduler, global_step, tb_logger, default_gpu, -1)
         
-        if pair_match_loss < best_loss_model["result"]:
-            best_loss_model["model"] = copy.deepcopy(model)
-            best_loss_model["result"] = pair_match_loss
-            best_loss_model["epoch"] = epoch_id
+        if pair_match_loss < lowest_loss_model["result"]:
+            lowest_loss_model["model"] = copy.deepcopy(model)
+            lowest_loss_model["result"] = pair_match_loss
+            lowest_loss_model["epoch"] = epoch_id
         
         
         if default_gpu:
@@ -573,51 +676,149 @@ def main():
     print("Finetune model:", args.freeze_before_layer)
     
     # Evaluation after training
-    numBatches = len(dl_test)
-    
     # Best rank_acc model
-    print(f"Best rank_acc model is {best_rank_model['epoch']}, best validation result is {best_rank_model['result']}")
-    output_records.append(f"Best model is {best_rank_model['epoch']}, best validation result is {best_rank_model['result']}")
+    print(f"Best rank_acc model is {best_performance_model['epoch']}, best validation result is {best_performance_model['result']}")
+    # output_records.append(f"Best model is {best_performance_model['epoch']}, best validation result is {best_performance_model['result']}")
     
-    results, pair_match_loss, masked_loss_t, masked_loss_v = evaluate_model(dl_test, 
-                                                                            task2num_iters, 
+    
+    if args.evaluate_on_bla_benchmark:
+        # Active Passive Test Set
+        results, pair_match_loss, masked_loss_t, masked_loss_v = evaluate_model(ap_dl_test, 
+                                                                            test_task2num_iters, 
                                                                             task, 
-                                                                            best_rank_model['model'], 
+                                                                            best_performance_model['model'], 
                                                                             device)
     
-    print(f"Test Set Validation of best rank_acc model, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}")
-    output_records.append(f"Test Set Validation of best model, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}, {results}")
-    
-    # Best loss model
-    print(f"Best loss model is {best_loss_model['epoch']}, best validation result is {best_loss_model['result']}")
-    output_records.append(f"Best loss model is {best_loss_model['epoch']}, best validation result is {best_loss_model['result']}")
-    
-    results, pair_match_loss, masked_loss_t, masked_loss_v = evaluate_model(dl_test, 
-                                                                            task2num_iters, 
+        print(f"AP Test Set Evaluation of best rank_acc model, results = {results}, loss = {pair_match_loss}")
+        output_records.append(f"AP Test Set Evaluation of best model, results = {results}, loss = {pair_match_loss}")
+        ap_best_performance = results['cls_acc']
+        
+        
+        #Coordination Test Set
+        results, pair_match_loss, masked_loss_t, masked_loss_v = evaluate_model(coord_dl_test, 
+                                                                            test_task2num_iters, 
                                                                             task, 
-                                                                            best_loss_model["model"], 
+                                                                            best_performance_model['model'], 
                                                                             device)
     
-    print(f"Test Set Validation of best loss model, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}")
-    output_records.append(f"Test Set Validation of best loss model, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}, {results}")
-    
-    # Evaluation after training
-    numBatches = len(dl_test)
-    print(f"Last model test")
-    
-    results, pair_match_loss, masked_loss_t, masked_loss_v = evaluate_model(dl_test, 
-                                                                            task2num_iters, 
+        print(f"Coord Test Set Evaluation of best rank_acc model, results = {results}, loss = {pair_match_loss}")
+        output_records.append(f"Coord Test Set Evaluation of best model, results = {results}, loss = {pair_match_loss}")
+        coord_best_performance = results['cls_acc']
+        
+        # Relative Clause Test Set
+        results, pair_match_loss, masked_loss_t, masked_loss_v = evaluate_model(rc_dl_test, 
+                                                                            test_task2num_iters, 
                                                                             task, 
-                                                                            model, 
+                                                                            best_performance_model['model'], 
                                                                             device)
     
-    print(f"Test Set Validation of last model, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}")
-    output_records.append(f"Test Set Validation of last model, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}, {results}")
+        print(f"RC Test Set Evaluation of best rank_acc model, results = {results}, loss = {pair_match_loss}")
+        output_records.append(f"RC Test Set Evaluation of best model, results = {results}, loss = {pair_match_loss}")
+        rc_best_performance = results['cls_acc']
+        
+        result_table = wandb.Table(columns=["model", "dataset", 
+                                            "ap_zero-shot", "ap_best_model", "ap_improvement",
+                                            "coord_zero-shot", "coord_best_model", "coord_improvement",
+                                            "rc_zero-shot", "rc_best_model", "rc_improvement",], 
+                                   
+                                   data=[[pretrained_model_name, dataset_type, 
+                                          ap_zero_shot_performance, ap_best_performance, 
+                                          ap_best_performance - ap_zero_shot_performance,
+                                          coord_zero_shot_performance, coord_best_performance, 
+                                          coord_best_performance - coord_zero_shot_performance,
+                                          rc_zero_shot_performance, rc_best_performance, 
+                                          rc_best_performance - rc_zero_shot_performance],
+                                         ]
+                                   )
+        
+        run.log({"mixture_finetune_results_cls_acc": result_table})
+        run.log(metrics)
+        
+    else: 
+        results, pair_match_loss, masked_loss_t, masked_loss_v = evaluate_model(dl_test, 
+                                                                            test_task2num_iters, 
+                                                                            task, 
+                                                                            best_performance_model['model'], 
+                                                                            device)
+        metrics = {"test/epoch": epoch_id,
+                   "test/rank_acc ": results['rank_acc'], 
+                   "test/cls_acc": results['cls_acc'], 
+                   "test/loss": pair_match_loss,
+                  }
+        
+        run.log(metrics)
+        
+        result_records = {
+            "model": pretrained_model_name, "dataset": dataset_type, "zero-shot": zero_shot_performance,\
+                 "best_model": results['cls_acc'], "improvement": results['cls_acc'] - zero_shot_performance
+        }
+        
+        result_table = wandb.Table(columns= list(result_records.keys()), 
+                                   data=[list(result_records.values())]
+                                   )
+        
+        run.log({"finetune_results_cls_acc": result_table})
+        wandb.log(result_records)
+        
+        
+        
+        print(f"Test Set Evaluation of best rank_acc model,", results)
+        output_records.append(f"Test Set Evaluation of best model, results = {results}")
+    
+    
+    # # Evaluation after training, based on last model on validation
+    
+    # if args.evaluate_on_bla_benchmark:
+    #     # Active Passive Test Set
+    #     results, pair_match_loss, masked_loss_t, masked_loss_v = evaluate_model(ap_dl_test, 
+    #                                                                         test_task2num_iters, 
+    #                                                                         task, 
+    #                                                                         model, 
+    #                                                                         device)
+    
+    #     print(f"AP Test Set Evaluation of last rank_acc model, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}")
+    #     output_records.append(f"AP Test Set Evaluation of last model, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}, {results}")
+        
+    #     #Coordination Test Set
+    #     results, pair_match_loss, masked_loss_t, masked_loss_v = evaluate_model(coord_dl_test, 
+    #                                                                         test_task2num_iters, 
+    #                                                                         task, 
+    #                                                                         model, 
+    #                                                                         device)
+    
+    #     print(f"Coord Test Set Evaluation of last rank_acc model, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}")
+    #     output_records.append(f"Coord Test Set Evaluation of last model, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}, {results}")
+        
+    #     # Relative Clause Test Set
+    #     results, pair_match_loss, masked_loss_t, masked_loss_v = evaluate_model(rc_dl_test, 
+    #                                                                         test_task2num_iters, 
+    #                                                                         task, 
+    #                                                                         model, 
+    #                                                                         device)
+    
+    #     print(f"RC Test Set Evaluation of last rank_acc model, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}")
+    #     output_records.append(f"RC Test Set Evaluation of last model, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}, {results}")
+        
+        
+    # else: 
+    #     results, pair_match_loss, masked_loss_t, masked_loss_v = evaluate_model(dl_test, 
+    #                                                                         test_task2num_iters, 
+    #                                                                         task, 
+    #                                                                         model, 
+    #                                                                         device)
+        
+    #     
+        
+        
+        
+    #     print(f"Test Set Evaluation of last rank_acc model, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}")
+    #     output_records.append(f"Test Set Evaluation of last model, rank_acc = {results['rank_acc']}, cls_acc = {results['cls_acc']}, loss = {pair_match_loss}, {results}")
+    
     
     if default_gpu:
         tb_logger.txt_close()
     
-    json.dump(output_records, open(json_path + "_result.json", "w"), indent=2)
+    json.dump(output_records, open(os.path.join(args.logdir, "result.json"), "w"), indent=2)
     
 
 if __name__ == "__main__":

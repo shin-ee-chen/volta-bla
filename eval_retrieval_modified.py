@@ -26,7 +26,7 @@ from volta.encoders import BertForVLPreTraining, BertForVLTasks, M3PForVLTasks
 from volta.task_utils import LoadDatasetTest
 
 import analysis_tools as tools
-
+import wandb
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -50,7 +50,7 @@ def parse_args():
     # parser.add_argument("--from_pretrained", default="/home/xchen/volta-bla/checkpoints/mmdata/ctrl_vilbert/RetrievalMMdata_ctrl_vilbert_base/pytorch_model_9.bin", type=str,
     #                     help="Bert pre-trained model selected in the list: bert-base-uncased, "
     #                             "bert-large-uncased, bert-base-cased, bert-base-multilingual, bert-base-chinese.")
-    # parser.add_argument("--from_pretrained", default="/home/xchen/volta-bla/exmaple_xinyi_foil/checkpoints/ctrl_vilbert_base/FOIL_annotations_all/pytorch_model_best.bin", type=str,
+    # parser.add_argument("--from_pretrained", default="/home/xchen/volta-bla/example_xinyi_foil/checkpoints/ctrl_vilbert_base/FOIL_annotations_all/pytorch_model_best.bin", type=str,
     #                     help="Bert pre-trained model selected in the list: bert-base-uncased, "
     #                             "bert-large-uncased, bert-base-cased, bert-base-multilingual, bert-base-chinese.")
     parser.add_argument("--config_file", default="/home/xchen/volta-bla/config/ctrl_vilbert_base.json", type=str,
@@ -58,7 +58,7 @@ def parse_args():
     parser.add_argument("--is_m3p", action='store_true', default=False,
                         help="Use M3P.")
     # Output
-    parser.add_argument("--output_dir", default="/home/xchen/volta-bla/exmaple_xinyi_bla_train/results/check",
+    parser.add_argument("--output_dir", default="/home/xchen/volta-bla/example_xinyi_bla_train/results/check",
                         type=str,
                         help="The output directory where the model checkpoints will be written.")
     parser.add_argument("--save_name", default="", type=str,
@@ -157,7 +157,23 @@ def main():
     savePath = os.path.join(args.output_dir)
     if default_gpu and not os.path.exists(savePath):
         os.makedirs(savePath)
-
+        
+    
+    # WanB Inits
+    # start a new wandb run to track this script
+    dataset_name = args.test_annotations_jsonpath.split("/")[-1]
+    
+    run = wandb.init(
+        # set the wandb project where this run will be logged
+        project="bla-2023",
+    
+        # track hyperparameters and run metadata
+        config={
+        "dataset": dataset_name,
+        "model_name": model_name
+        }
+        )     
+    
     # Seed
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -201,27 +217,24 @@ def main():
     # Evaluate
     model.eval()
     results = []
+    correct_samples = {}
     others = []
     
     correct_cnt = 0
     for i, batch in tqdm(enumerate(dl_val), total=task2num_iters[task]):
-        batch = tuple(t.cuda(device=device, non_blocking=True) for t in batch)
+        # batch = tuple(t.cuda(device=device, non_blocking=True) for t in batch)
+        batch = tuple(t.to(device=device) for t in batch)
         features, spatials, image_mask, question, input_mask, \
             segment_ids, target, caption_idx, image_id = batch
-        
+        image_id = image_id.item()
         question = question.squeeze(0)
         segment_ids = segment_ids.squeeze(0)
         input_mask = input_mask.squeeze(0)
-
 
         features = features.repeat(question.size(0), 1, 1)
         spatials = spatials.repeat(question.size(0), 1, 1)
         image_mask = image_mask.repeat(question.size(0), 1)
         
-        # question = question.repeat(features.size(0), 1)
-        # segment_ids = segment_ids.repeat(features.size(0), 1)
-        # input_mask = input_mask.repeat(features.size(0), 1)
-
         target = target.view(-1).float().cpu().numpy()
         vil_logits = np.zeros(len(target))
         
@@ -262,7 +275,7 @@ def main():
 
         # results.append({"image_id": image_id.item(), "rank": rank, \
         #     "scores": vil_logits.tolist()})
-        results.append({"image_id": image_id.item(), "rank": rank, \
+        results.append({"image_id": image_id, "rank": rank, \
             "scores": vil_logits})
         
         if len(target) <= 2:
@@ -271,8 +284,43 @@ def main():
                 others.append(f"{i}: { vil_logits}\n")
         #     # results.append({"image_idx": i, "rank": rank.tolist(), "scores": vil_logit.tolist()})
         #     print(correct_cnt/ (i + 1))
+        else:
+            if rank[0] <= 2:
+                correct_cnt += 1
+                s_label = "True1"
+                correct_samples[str(image_id) + "_" + s_label] = {"img_id": image_id,
+                                                             "label": s_label,
+                                                             "sen_rank": rank[0],
+                                                             "set_rank": rank
+                                                             }
+                
+            if rank[1] <= 2:
+                correct_cnt += 1
+                s_label = "True2"
+                correct_samples[str(image_id) + "_" + s_label] = {"img_id": image_id,
+                                                             "label": s_label,
+                                                             "sen_rank": rank[1],
+                                                             "set_rank": str(rank)
+                                                             }
+            if rank[2] > 2:
+                correct_cnt += 1
+                s_label = "False1"
+                correct_samples[str(image_id) + "_" + s_label] = {"img_id": image_id,
+                                                             "label": s_label,
+                                                             "sen_rank": rank[2],
+                                                             "set_rank": rank
+                                                             }
+            if rank[3] > 2:
+                correct_cnt += 1
+                s_label = "False2"
+                correct_samples[str(image_id) + "_" + s_label] = {"img_id": image_id,
+                                                             "label": s_label,
+                                                             "sen_rank": rank[3],
+                                                             "set_rank": rank
+                                                             }
+                
         
-    if "ctrl_" in model_name and args.test_annotations_jsonpath != "":
+    if "tasks" not in model_name and args.test_annotations_jsonpath != "":
         dataset_names = args.test_annotations_jsonpath.split("/")
         dataset_task_type = dataset_names[-2] + "_" + dataset_names[-1][:-10]
         json_path = os.path.join(savePath, dataset_task_type + "_pretrained" )
@@ -280,25 +328,30 @@ def main():
         json_path = os.path.join(savePath, model_name)
     
 
-    if len(target) > 2:
+    if args.eval_num_set_size > 2:
         result_ranks = [r["rank"] for r in results]
         rank_statistics = tools.get_rank_statistics(result_ranks)
         # cls_statistics = tools.get_bi_cls_statistics(results, 0.5)
+        # bi_result_table = wandb.Table(columns=["model", "dataset"].extend(cls_statistics.keys()), 
+        #                               data=[model_name, dataset_names].extend([cls_statistics.values()])
+        #                               )
         print(rank_statistics['rank_acc'])
         # score_statistics['rank_acc'] = statistics['sent_acc']
         # score_statistics["total"] = statistics['total']
         # score_statistics["model"] = model_name
         # score_statistics["task"] = task_name
-        # json.dump(score_statistics, open(json_path + "_result.json", "w"), indent=2)
+        # json.dump(cls_statistics, open(json_path + "_result.json", "w"), indent=2)
+    
     else:
         result_ranks = [r["rank"] for r in results]
         rank_statistics = tools.get_rank_statistics(result_ranks)
         print("rank acc", rank_statistics['rank_acc'])
         print(correct_cnt / len(dl_val))
     
-    # json.dump(others, open(json_path + "_model_outputs.json", "w"), indent=2)
+    # json.dump(correct_samples, open(json_path + "_correct_samples.json", "w"), indent=2)
     # print(others)
-    print("Results saved at", json_path + "_result.json")
+    run.log({"table_key": bi_result_table})
+    # print("Results saved at", json_path + "_result.json")
     print("finish")
 
 
