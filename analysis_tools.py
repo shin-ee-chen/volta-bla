@@ -157,11 +157,10 @@ def get_bi_cls_statistics(logits, targets):
         "cls_n_f1_score": np.round(n_f1_score.item() * 100, 2),
         "cls_n_precision": np.round(n_precision.item() * 100, 2),
         "cls_n_recall": np.round(n_recall.item() * 100, 2),
+        "cls_num_yes": (total_TP+total_FP).item(),
+        "cls_num_no": (total_TN + total_FN).item()
     }
-    # return {
-    #     "cls_acc": np.round((tp+tn) / total * 100, 2),
-        
-    #     }
+    
 
 
 if __name__ == "__main__":
