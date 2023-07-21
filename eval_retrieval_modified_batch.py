@@ -14,7 +14,7 @@ import argparse
 from io import open
 from tqdm import tqdm
 from easydict import EasyDict as edict
-
+import wandb
 import numpy as np
 
 import torch
@@ -42,13 +42,11 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     # Model
-    parser.add_argument("--from_pretrained", default="/home/xchen/volta-bla/checkpoints/mmdata/ctrl_vilbert/RetrievalMMdata_ctrl_vilbert_base/pytorch_model_9.bin", type=str,
+    parser.add_argument("--from_pretrained", default="/home/xchen/volta-bla/checkpoints/mmdata/ctrl_lxmert/RetrievalMMdata_ctrl_lxmert/pytorch_model_9.bin", type=str,
                         help="Bert pre-trained model selected in the list: bert-base-uncased, "
                              "bert-large-uncased, bert-base-cased, bert-base-multilingual, bert-base-chinese.")
-    # parser.add_argument("--from_pretrained", default="/home/xchen/volta-bla/exmaple_xinyi_bla_train/checkpoints/ctrl_vilbert_base/ctrl_active_tasks_100_1_all_4e-05_32_0_ctrl_vilbert/pytorch_model_best.bin", type=str,
-    #                     help="Bert pre-trained model selected in the list: bert-base-uncased, "
-    #                          "bert-large-uncased, bert-base-cased, bert-base-multilingual, bert-base-chinese.")
-    parser.add_argument("--config_file", default="/home/xchen/volta-bla/config/ctrl_vilbert_base.json", type=str,
+   
+    parser.add_argument("--config_file", default="/home/xchen/volta-bla/config/ctrl_lxmert.json", type=str,
                         help="The config file which specified the model details.")
     parser.add_argument("--is_m3p", action='store_true', default=False,
                         help="Use M3P.")
@@ -151,7 +149,22 @@ def main():
     savePath = os.path.join(args.output_dir)
     if default_gpu and not os.path.exists(savePath):
         os.makedirs(savePath)
-
+    
+    # WanB Inits
+    # start a new wandb run to track this script
+    dataset_name = args.test_annotations_jsonpath.split("/")[-1]
+    
+    run = wandb.init(
+        # set the wandb project where this run will be logged
+        project="bla-2023",
+    
+        # track hyperparameters and run metadata
+        config={
+        "dataset": dataset_name,
+        "model_name": model_name
+        }
+        )         
+    
     # Seed
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -243,9 +256,6 @@ def main():
                     vil_logit_scores.append(vil_logit)
                     targets.append(target_j)
                     
-                    # vil_logits_orginal[j] = vil_logit[:,0]
-                    # print(i, j, question_j.shape, features_j.shape, spatials_j.shape, segment_ids_j.shape, input_mask_j.shape, image_mask_j.shape)
-                    # print(i, image_id, j, vil_logit.view(-1).cpu().numpy())
                     vil_logit = torch.softmax(vil_logit, dim=1)[:, 0]  
                 
                 else:
@@ -271,16 +281,21 @@ def main():
     else:
         json_path = os.path.join(savePath, task_name + "_" + model_name)
     
-    if len(target) > 2:
+    if args.eval_num_set_size > 2:
         statistics = tools.get_rank_statistics(rank_predictions)
+        # print(statistics)
         bi_cls_results = tools.get_bi_cls_statistics(torch.cat(vil_logit_scores, 0).cpu(), 
                                                      targets)
-        statistics.update(bi_cls_results)
-        # score_statistics["model"] = model_name
-        # score_statistics["task"] = task_name
-        # json.dump(score_statistics, open(json_path + "_result.json", "w"), indent=2)
-        # print("Evaluation accuracy:", statistics['sent_acc'], score_statistics)
-        json.dump(statistics, open(json_path + "_result.json", "w"), indent=2)
+        print("bi_cls_results Results:", bi_cls_results)
+    
+        print([model_name, task_name] + list(bi_cls_results.values()))
+        
+        
+        bi_result_table = wandb.Table(columns=["model", "dataset"] + list(bi_cls_results.keys()), 
+                                      data=[[model_name.split("_")[2], task_name] + list(bi_cls_results.values())]
+                                      )
+        
+        
     else:
         statistics = {}
         target_cp = targets.reshape(-1, 2)
@@ -291,35 +306,15 @@ def main():
             else:
                 new_correct_cnt += 1
         
-        correct_cnt = ((rank_predictions - 1) == (1 - targets.reshape(-1, 2))).sum() / 2
-        statistics['rank_acc'] = np.round(correct_cnt / len(rank_predictions) * 100, 2)
-        statistics["total"] = len(rank_predictions)
         bi_cls_results = tools.get_bi_cls_statistics(torch.cat(vil_logit_scores, 0).cpu(), 
                                                      torch.tensor(targets))
-        statistics.update(bi_cls_results)
         
-    # json.dump(others, open(json_path + ".json", "w"), indent=2)
-    
-    print("Results saved at", json_path + "_result.json")
-    print(f"rank_acc = {statistics['rank_acc']}, cls_acc = {statistics['cls_acc']}")
+        bi_result_table = wandb.Table(columns=["model", "dataset"] + list(bi_cls_results.keys()), 
+                                      data=[[model_name.split("_")[2], task_name] + list(bi_cls_results.values())]
+                                      )
+        
+    run.log({"evaluation_results": bi_result_table})
     print("finish")
-
-    # if len(target) > 2:
-    #     statistics = tools.get_statistics(results)
-    #     score_statistics, _ = tools.prediction_via_scores(results, 0.5)
-    #     print(statistics['sent_acc'], score_statistics)
-    #     score_statistics['rank_acc'] = statistics['sent_acc']
-    #     score_statistics["total"] = statistics['total']
-    #     score_statistics["model"] = model_name
-    #     score_statistics["task"] = task_name
-    #     json.dump(score_statistics, open(json_path + "_result.json", "w"), indent=2)
-    # else:
-    #     print(correct_cnt / len(dl_val))
-    
-    # json.dump(results, open(json_path + "_model_outputs.json", "w"), indent=2)
-    
-    # print("Results saved at", json_path + "_result.json")
-    # print("finish")
 
 
 if __name__ == "__main__":
