@@ -1,0 +1,40 @@
+1. Load needed modules
+module load 2021 
+module load Miniconda3/4.9.2
+
+2. Create conda environment with python3.6
+conda create -n condaenv python=3.6
+source activate condaenv 
+
+3. Load required modules that have CUDA and GCC
+module load CUDA/11.3.1 
+module load UCX-CUDA/1.10.0-GCCcore-10.3.0-CUDA-11.3.1
+
+4. Install required condatoolkit
+conda install pytorch==1.10.1 torchvision==0.11.2 cudatoolkit=11.3 -c pytorch -c conda-forge
+
+pip install torch==1.10.2+cu113 torchvision==0.11.3+cu113 torchaudio===0.10.2+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html 
+
+5. Install volta requirements
+cd volta
+pip install -r requirements.txt
+
+6. Check PyTorch and torch vision versions match required ones
+$ python
+$ import torch
+$ torch.__version__
+
+
+7. Install APEX
+cd apex/
+python setup.py install --install-lib ~/.conda/envs/volta2024/lib/python3.6/site-packages
+
+8. Setup the refer submodule for referring expression comprehension + install it
+a. cd tools/refer; make
+[might have error -> change volta/tools/refer/external/_mask.pyx line 258 "len(np_poly)/2" to "len(np_poly)//2" ]
+
+b. cd volta
+python setup.py develop
+[If does not work: setup.py, change the first line "from distils.core import setup" to "from setup tools import setup"]
+
+See case study with Retrieval with Flick30k
